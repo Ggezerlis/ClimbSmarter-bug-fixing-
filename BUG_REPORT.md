@@ -12,7 +12,7 @@
 
 | # | Severity | Area | Bug |
 |---|---|---|---|
-| 0 | **High** | Post-onboarding | Dashboard stuck forever on a dark "Building Your Plan…" spinner screen after choosing a plan (the likely "black screen") |
+| 0 | Medium (was High) | Post-onboarding | Black screen after onboarding: reported fixed by the owner; **residual:** subscription choices sometimes need a manual refresh to appear. Dashboard "Building Your Plan…" spinner also never auto-updated in my test |
 | 1 | High | Subscription / Stripe | Live Stripe checkout session still created while test mode is on |
 | 2 | High | Dashboard | Blank dashboard plus request storm for a verified user with no profile |
 | 3 | Medium | Copy | Home, `/preview`, `/plan-ready` still say "charged today / immediately" |
@@ -30,11 +30,15 @@
 | 15 | Low | Perf/hygiene | Redundant polling, unused preload warning, missing security headers |
 | 17 | Medium | Onboarding | `/subscribe` ignores the server-saved profile and sends you back to onboarding step 1 |
 | 18 | Medium | Onboarding | Free user with no profile is bounced from `/onboarding` to a broken dashboard; the result flips between spinner and empty page |
+| 19 | Medium | Subscribe page | Nav bar (sidebar / bottom tabs) shown to brand-new accounts that have no plan or dashboard yet |
 | 16 | Low | Routing | Plan choice lost from home pricing; authed users can view `/login` |
 
 ---
 
-## 0. Dashboard stuck on a near-black "Building Your Plan…" screen: High (certain)
+## 0. Black screen after onboarding / stuck "Building Your Plan…": Medium (certain when tested; owner reports a fix since)
+
+> **Status update (owner, after this test):** the black screen after onboarding is fixed. **Remaining issue:** right after onboarding, the choose-a-subscription page sometimes does not display its plan options until the user refreshes the page. It is intermittent and I have not reproduced it yet. It may be the same root cause as below: data (profile, plan or subscription state) is fetched once and never re-fetched when it becomes ready.
+> The findings below are from my test before the fix and may no longer reproduce.
 
 - **Repro (mobile 390px and desktop 1280px, same result):**
   1. Log in as a verified user, complete all 8 onboarding steps, press **Generate my plan** (Generating → `/preview`).
@@ -191,6 +195,17 @@ Existing subscribers see a "Billing Cycle" panel (with a confirm button) and a s
 - **Repro:** Account with `plan: free` and no profile (reachable via `activate-free`, and possibly after cancelling and clearing data): open `/onboarding`.
 - **Actual:** You are redirected to `/dashboard`. Depending on timing, the dashboard shows either the full-screen "Building Your Plan…" spinner (no sidebar) or an empty page with only the sidebar. The request storm from bug #2 runs in the background.
 - **Effect:** The user cannot complete onboarding, and the page gives no error or working way out.
+
+## 19. Navigation bar is shown on the choose-a-subscription page for brand-new accounts: Medium (certain)
+
+- **Repro:**
+  1. Create an account and verify the email (or finish onboarding), so the account has no plan yet.
+  2. Land on `/subscribe`.
+- **Actual:** The full app navigation is shown: the sidebar on desktop (Dashboard, AI Coach, Weekly Check-in, Nutrition, Subscription, Settings, plus the "Get the app" box and the sign-out button), and the bottom tab bar on mobile. See `01-subscribe-desktop-clipped-cta.png` and `02-subscribe-mobile-cards-clipped.png`, both taken on a new account with `plan: none`.
+- **Expected:** A user who has just signed up has no plan or dashboard yet, so this page should be a focused, nav-free screen (logo and, at most, a sign-out link). Every nav item leads to a page that is empty, locked or a dead end.
+- **Effect:** Users click "Dashboard" and land on a dashboard that does not exist for them yet. I observed exactly those broken states for accounts with no plan or profile (see #2 and #18). The nav also pulls attention away from the plan choice.
+- **Fix:** Render `/subscribe` without the app layout while the user has no plan (`plan: none`). Restore the nav once a plan, including Free, is active.
+- **Related:** The same applies to any other page shown before a plan exists (for example while onboarding is incomplete).
 
 ## 16. Routing: Low (certain)
 
