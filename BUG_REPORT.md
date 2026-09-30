@@ -12,6 +12,7 @@
 
 | # | Severity | Area | Bug |
 |---|---|---|---|
+| 0 | **High** | Post-onboarding | Dashboard stuck forever on a dark "Building Your Plan…" spinner screen after choosing a plan (the likely "black screen") |
 | 1 | High | Subscription / Stripe | Live Stripe checkout session still created while test mode is on |
 | 2 | High | Dashboard | Blank dashboard plus request storm for a verified user with no profile |
 | 3 | Medium | Copy | Home, `/preview`, `/plan-ready` still say "charged today / immediately" |
@@ -27,9 +28,28 @@
 | 13 | Low | Onboarding | Silent defaults, weak DOB and injuries validation |
 | 14 | Low | Copy | Pluralization, "link" vs "code", "expires in 10 hours" |
 | 15 | Low | Perf/hygiene | Redundant polling, unused preload warning, missing security headers |
+| 17 | Medium | Onboarding | `/subscribe` ignores the server-saved profile and sends you back to onboarding step 1 |
+| 18 | Medium | Onboarding | Free user with no profile is bounced from `/onboarding` to a broken dashboard; the result flips between spinner and empty page |
 | 16 | Low | Routing | Plan choice lost from home pricing; authed users can view `/login` |
 
 ---
+
+## 0. Dashboard stuck on a near-black "Building Your Plan…" screen: High (certain)
+
+- **Repro (mobile 390px and desktop 1280px, same result):**
+  1. Log in as a verified user, complete all 8 onboarding steps, press **Generate my plan** (Generating → `/preview`).
+  2. Press **Subscribe**, then choose **Activate Pro test access**. You land on `/dashboard`.
+- **Actual:**
+  - The screen shows only a small spinner, "Building Your Plan… This page will update automatically", and two buttons on a near-black background. See the evidence screenshots.
+  - It **never advances**. I watched for ~22s after activation and the page stayed there. The browser made only two `GET /api/training/plan` calls (at ~1s and ~3s after landing), and then **stopped polling**.
+  - The plan does exist: the same call returned **200** right after, and a **fresh page load shows the full dashboard** immediately.
+- **Why users call it a black screen:** the page is almost entirely dark, with no navigation or content. A user who doesn't reload assumes it is broken.
+- **Fix:**
+  - Keep polling `/api/training/plan` (for example every 2–3s, with a timeout and an error state), or invalidate the plan query when generation finishes.
+  - Make **Check now** and **Redo onboarding** work as escape hatches. I could not reliably reach "Check now" in the stuck state, because the screen alternated between this spinner and an empty dashboard (see #18).
+  - Show an error and a retry button if generation fails, instead of an endless spinner.
+- **Evidence:** `bug-report-screenshots/10-dashboard-building-plan-stuck-mobile.png`, `11-dashboard-building-plan-stuck-desktop.png`.
+- **Not reproduced:** a fully blank page immediately after **Generate**. Generating and `/preview` both rendered on mobile and desktop. If you see the black screen at a different step, or on a specific device or browser (for example Safari or an in-app browser), tell me which and I'll target it.
 
 ## 1. Live Stripe checkout is still reachable in test mode: High (certain)
 
@@ -159,6 +179,18 @@ Existing subscribers see a "Billing Cycle" panel (with a confirm button) and a s
   - Two different HSTS headers are sent on API responses.
 - **Plan-ready screen:** After the plan existed (verified via API at ~17s), the dashboard still showed "Building Your Plan… This page will update automatically" 3s later. A fresh load showed it correctly. I did not measure the auto-update delay. (guessing)
 - **Nutrition targets:** Full-plan defaults were an identical **2500 kcal / 160 g / 300 g / 2.5 L** for a user with no body data. The "AI macro targets" claim looks unpersonalized. (guessing)
+
+## 17. `/subscribe` redirects to onboarding even though the profile is saved: Medium (certain)
+
+- **Repro:** Complete onboarding so the profile is saved (`GET /api/profile` returns it), then open `/subscribe` in a new browser session or after clearing site data, without a plan yet.
+- **Actual:** You are sent to `/onboarding` step 1 ("One more step: complete your profile"). The code checks the browser-local onboarding data and the plan state, not the server profile.
+- **Effect:** Users who onboard on one device or browser, then open the site on another, must redo all 8 steps before they can pick a plan.
+
+## 18. Free user without a profile hits a dead end: Medium (certain)
+
+- **Repro:** Account with `plan: free` and no profile (reachable via `activate-free`, and possibly after cancelling and clearing data): open `/onboarding`.
+- **Actual:** You are redirected to `/dashboard`. Depending on timing, the dashboard shows either the full-screen "Building Your Plan…" spinner (no sidebar) or an empty page with only the sidebar. The request storm from bug #2 runs in the background.
+- **Effect:** The user cannot complete onboarding, and the page gives no error or working way out.
 
 ## 16. Routing: Low (certain)
 
